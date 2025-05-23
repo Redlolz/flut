@@ -1,0 +1,6 @@
+functie hoofd() {
+    som = (1 + 2) / 3 * 4 - 1;
+    bericht = "hallo wereld!";
+    print(bericht);
+    teruggave 0;
+}

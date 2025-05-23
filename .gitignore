@@ -1,0 +1,13 @@
+# Binaries
+flut
+parser-test
+vm-test
+
+# Object files
+*.o
+
+# Editor files
+.clangd
+.clangformat
+.kdev4/
+*.kdev4
