@@ -135,111 +135,81 @@ PARSER_NODE* lexer_symbol_to_node(PARSER_TYPE type, LEX_SYMBOL symbol)
 PARSER_NODE* parse_rule(struct rule **rule, size_t rule_size, LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
 {
     PARSER_NODE *parent_node = NULL;
-    // PARSER_NODE *left_node = NULL;
-    // PARSER_NODE *right_node = NULL;
 
     size_t i = 0;
     while (i < rule_size) {
         skip_unimportant_symbols(symbols, symbols_size, symbols_index);
+
+        PARSER_NODE *node = NULL;
+
         if (rule[i]->type == RULE_TYPE_TERMINAL) {
-            // Eat spaces and newlines and stuff here
-            if (rule[i]->symbol != symbols[*symbols_index].type) {
-                // check if the next rule is an or and if so go to the rule after
-                if (i + 1 < rule_size) {
-                    if (rule[i+1]->type == RULE_TYPE_OR) {
-                        i+=2;
-                        continue;
-                    }
-                }
-                // Rule not true
-                if (parent_node != NULL) {
-                    if (parent_node->left != NULL) {
-                        free(parent_node->left);
-                    }
-                    if (parent_node->right != NULL) {
-                        free(parent_node->right);
-                    }
-                    free(parent_node);
-                }
-                return NULL;
+            if (rule[i]->symbol == symbols[*symbols_index].type) {
+                // From lexer format to parser
+                node = lexer_symbol_to_node(rule[i]->node_type, symbols[*symbols_index]);
+                *symbols_index += 1;
             }
-
-            // From lexer format to parser
-            PARSER_NODE *terminal = lexer_symbol_to_node(rule[i]->node_type, symbols[*symbols_index]);
-            if (parent_node == NULL) {
-                parent_node = terminal;
-            } else if (terminal->right == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
-                terminal->right = parent_node;
-                parent_node = terminal;
-            } else if (terminal->left == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
-                terminal->left = parent_node;
-                parent_node = terminal;
-            } else if (terminal->right == NULL && rule[i]->priority == PRIORITY_SECONDARY) {
-                parent_node->right = terminal;
-            } else if (parent_node->left == NULL) {
-                parent_node->left = parent_node->right;
-                parent_node->right = terminal;
-            }
-
-            // if (rule[i]->priority == PLACE_LEFT) {
-            //     left_node = terminal;
-            // } else if (rule[i]->priority == PLACE_RIGHT) {
-            //     right_node = terminal;
-            // } else if (rule[i]->priority == PLACE_PARENT) {
-            //     parent_node = terminal;
-            // }
-            *symbols_index += 1;
         } else if (rule[i]->type == RULE_TYPE_NON_TERMINAL) {
             // Execute non-terminal
-            PARSER_NODE *non_terminal = rule[i]->func(symbols, symbols_size, symbols_index);
+            node = rule[i]->func(symbols, symbols_size, symbols_index);
+        } else if (rule[i]->type == RULE_TYPE_GROUP) {
+            node = parse_rule(rule[i]->group, rule[i]->group_size, symbols, symbols_size, symbols_index);
+        }
+
+        // If not NULL, put it somewhere
+        if (node != NULL) {
             if (parent_node == NULL) {
-                parent_node = non_terminal;
-            } else if (non_terminal->right == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
-                non_terminal->right = parent_node;
-                parent_node = non_terminal;
-            } else if (non_terminal->left == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
-                non_terminal->left = parent_node;
-                parent_node = non_terminal;
-            } else if (non_terminal->right == NULL && rule[i]->priority == PRIORITY_SECONDARY) {
-                parent_node->right = non_terminal;
+                parent_node = node;
+            } else if (node->right == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
+                node->right = parent_node;
+                parent_node = node;
+            } else if (node->left == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
+                node->left = parent_node;
+                parent_node = node;
+            } else if (node->right == NULL && rule[i]->priority == PRIORITY_SECONDARY) {
+                parent_node->right = node;
             } else if (parent_node->left == NULL) {
                 parent_node->left = parent_node->right;
-                parent_node->right = non_terminal;
+                parent_node->right = node;
+            } else { // No available spots in parent node
+                printf("hit!\n");
             }
-        } else if (rule[i]->type == RULE_TYPE_GROUP) {
-            PARSER_NODE *group = parse_rule(rule[i]->group, rule[i]->group_size, symbols, symbols_size, symbols_index);
-            if (group != NULL) {
-                if (parent_node == NULL) {
-                    parent_node = group;
-                } else if (group->right == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
-                    group->right = parent_node;
-                    parent_node = group;
-                } else if (group->left == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
-                    group->left = parent_node;
-                    parent_node = group;
-                } else if (group->right == NULL && rule[i]->priority == PRIORITY_SECONDARY) {
-                    parent_node->right = group;
-                } else if (parent_node->left == NULL) {
-                    parent_node->left = parent_node->right;
-                    parent_node->right = group;
+        } else { // Rule not true
+            // check if the next rule is an or and if so go to the rule after
+            if (i + 1 < rule_size) {
+                if (rule[i+1]->type == RULE_TYPE_OR) {
+                    i+=2;
+                    continue;
                 }
             }
+
+            // if a rule had a repeat we expected it to fail at some point
+            if (rule[i]->repeat == REPEAT_ZERO_OR_MORE) {
+                i++;
+                continue;
+            }
+
+            if (parent_node != NULL) {
+                if (parent_node->left != NULL) {
+                    free(parent_node->left);
+                }
+                if (parent_node->right != NULL) {
+                    free(parent_node->right);
+                }
+                free(parent_node);
+            }
+            return NULL;
         }
 
         // skip if rule repeats
-        i++;
+        // TODO add check for REPEAT_ONE_OR_MORE
+        if (rule[i]->repeat != REPEAT_ZERO_OR_MORE) {
+            i++;
+        }
     }
 
     if (parent_node == NULL) {
         return NULL;
     }
-
-    // if (parent_node->left == NULL) {
-    //     parent_node->left = left_node;
-    // }
-    // if (parent_node->right == NULL) {
-    //     parent_node->right = right_node;
-    // }
 
     return parent_node;
 }
