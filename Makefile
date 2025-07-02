@@ -1,5 +1,5 @@
 CFLAGS=-std=c11 -g -Wall -Wextra -pedantic
-DEPS=flut.o lexer.o parser.o vm.o
+DEPS=flut.o lexer.o parser.o treewalker.o vm.o
 BINNAME=flut
 
 all: $(BINNAME)
@@ -7,7 +7,7 @@ all: $(BINNAME)
 %.o: %.c
 	$(CC) -c -o $@ $< $(CFLAGS)
 
-$(BINNAME): $(DEPS)
+$(BINNAME): $(DEPS) *.h
 	$(CC) -o $@ $(DEPS) $(CFLAGS)
 
 .PHONY: vm-test parser-test clean

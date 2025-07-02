@@ -1,6 +1,7 @@
 #include "parser.h"
 #include "lexer.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -24,6 +25,7 @@ typedef enum {
 typedef enum {
     PRIORITY_PRIMARY,
     PRIORITY_SECONDARY,
+    PRIORITY_NONE,
 } PRIORITY;
 
 struct rule {
@@ -119,11 +121,74 @@ PARSER_NODE* lexer_symbol_to_node(PARSER_TYPE type, LEX_SYMBOL symbol)
 {
     PARSER_NODE *node = malloc(sizeof(PARSER_NODE));
     node->type = type;
+    node->left = NULL;
+    node->right = NULL;
 
     switch (node->type) {
         case PARSER_TYPE_IDENTIFIER:
             node->identifier = malloc(strlen(symbol.tekenreeks) + 1);
             strcpy(node->identifier, symbol.tekenreeks);
+            break;
+        case PARSER_TYPE_OPERATOR:
+            switch (symbol.type) {
+                case LEX_SYM_PLUS:
+                    node->operator = PARSER_OPERATOR_ADD;
+                    break;
+                case LEX_SYM_MIN:
+                    node->operator = PARSER_OPERATOR_SUBTRACT;
+                    break;
+                case LEX_SYM_KEER:
+                    node->operator = PARSER_OPERATOR_MULTIPLY;
+                    break;
+                case LEX_SYM_DELEN:
+                    node->operator = PARSER_OPERATOR_DIVIDE;
+                    break;
+                case LEX_SYM_GELIJK_AAN:
+                    node->operator = PARSER_OPERATOR_EQUAL_TO;
+                    break;
+                case LEX_SYM_NIET_GELIJK_AAN:
+                    node->operator = PARSER_OPERATOR_NOT_EQUAL_TO;
+                    break;
+                case LEX_SYM_LAGER_DAN:
+                    node->operator = PARSER_OPERATOR_LOWER_THAN;
+                    break;
+                case LEX_SYM_LAGER_DAN_GELIJK_AAN:
+                    node->operator = PARSER_OPERATOR_LOWER_THAN_EQUAL_TO;
+                    break;
+                case LEX_SYM_HOGER_DAN:
+                    node->operator = PARSER_OPERATOR_HIGHER_THAN;
+                    break;
+                case LEX_SYM_HOGER_DAN_GELIJK_AAN:
+                    node->operator = PARSER_OPERATOR_HIGHER_THAN_EQUAL_TO;
+                    break;
+                default:
+                    printf("Not an operator token!\n");
+                    break;
+            }
+            break;
+        case PARSER_TYPE_LITERAL:
+            switch (symbol.type) {
+                case LEX_SYM_NUMMER:
+                    node->literal = PARSER_LITERAL_NUMBER;
+                    node->number = symbol.nummer;
+                    break;
+                case LEX_SYM_TEKENREEKS:
+                    node->literal = PARSER_LITERAL_STRING;
+                    node->string = malloc(strlen(symbol.tekenreeks) + 1);
+                    strcpy(node->string, symbol.tekenreeks);
+                    break;
+                case LEX_SYM_ONWAAR:
+                    node->literal = PARSER_LITERAL_BOOLEAN;
+                    node->boolean = false;
+                    break;
+                case LEX_SYM_WAAR:
+                    node->literal = PARSER_LITERAL_BOOLEAN;
+                    node->boolean = true;
+                    break;
+                default:
+                    printf("Not a literal!\n");
+                    break;
+            }
             break;
         default:
             break;
@@ -142,10 +207,17 @@ PARSER_NODE* parse_rule(struct rule **rule, size_t rule_size, LEX_SYMBOL *symbol
 
         PARSER_NODE *node = NULL;
 
+        if (symbols[*symbols_index].type == LEX_SYM_PUNTKOMMA) {
+            *symbols_index += 1;
+            break;
+        }
+
         if (rule[i]->type == RULE_TYPE_TERMINAL) {
             if (rule[i]->symbol == symbols[*symbols_index].type) {
-                // From lexer format to parser
-                node = lexer_symbol_to_node(rule[i]->node_type, symbols[*symbols_index]);
+                if (rule[i]->node_type != PARSER_TYPE_NONE) {
+                    // From lexer format to parser
+                    node = lexer_symbol_to_node(rule[i]->node_type, symbols[*symbols_index]);
+                }
                 *symbols_index += 1;
             }
         } else if (rule[i]->type == RULE_TYPE_NON_TERMINAL) {
@@ -156,7 +228,9 @@ PARSER_NODE* parse_rule(struct rule **rule, size_t rule_size, LEX_SYMBOL *symbol
         }
 
         // If not NULL, put it somewhere
-        if (node != NULL) {
+        if (node != NULL && rule[i]->priority == PRIORITY_NONE) {
+
+        } else if (node != NULL) {
             if (parent_node == NULL) {
                 parent_node = node;
             } else if (node->right == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
@@ -165,7 +239,7 @@ PARSER_NODE* parse_rule(struct rule **rule, size_t rule_size, LEX_SYMBOL *symbol
             } else if (node->left == NULL && rule[i]->priority == PRIORITY_PRIMARY) {
                 node->left = parent_node;
                 parent_node = node;
-            } else if (node->right == NULL && rule[i]->priority == PRIORITY_SECONDARY) {
+            } else if (parent_node->right == NULL && rule[i]->priority == PRIORITY_SECONDARY) {
                 parent_node->right = node;
             } else if (parent_node->left == NULL) {
                 parent_node->left = parent_node->right;
@@ -174,11 +248,20 @@ PARSER_NODE* parse_rule(struct rule **rule, size_t rule_size, LEX_SYMBOL *symbol
                 printf("hit!\n");
             }
         } else { // Rule not true
-            // check if the next rule is an or and if so go to the rule after
-            if (i + 1 < rule_size) {
-                if (rule[i+1]->type == RULE_TYPE_OR) {
-                    i+=2;
+            // check if a following rule is an or and if so go to the rule after
+            bool or_found = false;
+            for (size_t x = i; x < rule_size; x++) {
+                if (rule[x]->type == RULE_TYPE_OR) {
+                    or_found = true;
+                    i = x+1;
+                    break;
+                }
+            }
+            if (or_found) {
+                if (parent_node == NULL) {
                     continue;
+                } else {
+                    return parent_node;
                 }
             }
 
@@ -205,10 +288,6 @@ PARSER_NODE* parse_rule(struct rule **rule, size_t rule_size, LEX_SYMBOL *symbol
         if (rule[i]->repeat != REPEAT_ZERO_OR_MORE) {
             i++;
         }
-    }
-
-    if (parent_node == NULL) {
-        return NULL;
     }
 
     return parent_node;
@@ -241,53 +320,6 @@ PARSER_NODE* parse_operator(LEX_SYMBOL *symbols, size_t symbols_size, size_t *sy
     return node;
 }
 
-PARSER_NODE* parse_primary(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
-{
-    PARSER_LITERAL literal;
-    char *string = NULL;
-    uint32_t number;
-
-    LEX_SYMBOL symbol = symbols[*symbols_index];
-    switch (symbol.type) {
-        case LEX_SYM_TEKENREEKS:
-            literal = PARSER_LITERAL_STRING;
-            string = malloc(strlen(symbol.tekenreeks) + 1);
-            strcpy(string, symbol.tekenreeks);
-            break;
-        case LEX_SYM_NUMMER:
-            literal = PARSER_LITERAL_NUMBER;
-            number = symbol.nummer;
-            break;
-        case LEX_SYM_HAAK_OPEN:
-            // TODO parse expression here
-        default:
-            return NULL;
-    }
-
-    PARSER_NODE *node = malloc(sizeof(PARSER_NODE));
-    node->type = PARSER_TYPE_LITERAL;
-    node->literal = literal;
-
-    if (string != NULL) {
-        node->string = string;
-    } else {
-        node->number = number;
-    }
-
-    *symbols_index += 1;
-
-    return node;
-}
-
-PARSER_NODE* parse_unary(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
-{
-    struct rule *rule[] = {
-        rule_create_non_terminal(parse_primary, PRIORITY_PRIMARY),
-    };
-
-    return parse_rule(rule, sizeof(rule) / sizeof(struct rule*), symbols, symbols_size, symbols_index);
-}
-
 struct ruleset {
     struct rule **rule;
     size_t size;
@@ -299,6 +331,39 @@ struct rule* ruleset_add(struct ruleset *ruleset, struct rule *rule)
     ruleset->rule = realloc(ruleset->rule, sizeof(struct rule*) * ruleset->size);
     ruleset->rule[ruleset->size-1] = rule;
     return rule;
+}
+
+PARSER_NODE* parse_primary(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
+{
+    static struct ruleset ruleset = { .rule = NULL, .size = 0 };
+    if (ruleset.rule == NULL) {
+        ruleset_add(&ruleset, rule_create_terminal(LEX_SYM_NUMMER, PRIORITY_PRIMARY, PARSER_TYPE_LITERAL));
+        ruleset_add(&ruleset, rule_create(RULE_TYPE_OR));
+        ruleset_add(&ruleset, rule_create_terminal(LEX_SYM_TEKENREEKS, PRIORITY_PRIMARY, PARSER_TYPE_LITERAL));
+        ruleset_add(&ruleset, rule_create(RULE_TYPE_OR));
+        ruleset_add(&ruleset, rule_create_terminal(LEX_SYM_WAAR, PRIORITY_PRIMARY, PARSER_TYPE_LITERAL));
+        ruleset_add(&ruleset, rule_create(RULE_TYPE_OR));
+        ruleset_add(&ruleset, rule_create_terminal(LEX_SYM_ONWAAR, PRIORITY_PRIMARY, PARSER_TYPE_LITERAL));
+    }
+
+    return parse_rule(ruleset.rule, ruleset.size, symbols, symbols_size, symbols_index);
+}
+
+PARSER_NODE* parse_unary(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
+{
+    static struct ruleset ruleset = { .rule = NULL, .size = 0 };
+    if (ruleset.rule == NULL) {
+        struct rule *group = ruleset_add(&ruleset, rule_create(RULE_TYPE_GROUP));
+        rule_add_to_group(group, rule_create_terminal(LEX_SYM_UITROEPTEKEN, PRIORITY_PRIMARY, PARSER_TYPE_INVERT));
+        rule_add_to_group(group, rule_create(RULE_TYPE_OR));
+        rule_add_to_group(group, rule_create_terminal(LEX_SYM_MIN, PRIORITY_PRIMARY, PARSER_TYPE_NEGATE));
+
+        ruleset_add(&ruleset, rule_create_non_terminal(parse_unary, PRIORITY_SECONDARY));
+        ruleset_add(&ruleset, rule_create(RULE_TYPE_OR));
+        ruleset_add(&ruleset, rule_create_non_terminal(parse_primary, PRIORITY_SECONDARY));
+    }
+
+    return parse_rule(ruleset.rule, ruleset.size, symbols, symbols_size, symbols_index);
 }
 
 PARSER_NODE* parse_factor(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
@@ -327,7 +392,6 @@ PARSER_NODE* parse_term(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbol
 {
     static struct ruleset ruleset = { .rule = NULL, .size = 0 };
     if (ruleset.rule == NULL) {
-
         // Add to ruleset
         ruleset_add(&ruleset, rule_create_non_terminal(parse_factor, PRIORITY_SECONDARY));
 
@@ -345,31 +409,55 @@ PARSER_NODE* parse_term(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbol
     return parse_rule(ruleset.rule, ruleset.size, symbols, symbols_size, symbols_index);
 }
 
+PARSER_NODE* parse_comparison(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
+{
+    static struct ruleset ruleset = { .rule = NULL, .size = 0 };
+    if (ruleset.rule == NULL) {
+        // Add to ruleset
+        ruleset_add(&ruleset, rule_create_non_terminal(parse_term, PRIORITY_SECONDARY));
+
+        struct rule *group = ruleset_add(&ruleset, rule_create(RULE_TYPE_GROUP));
+
+        struct rule *subgroup = rule_add_to_group(group, rule_create(RULE_TYPE_GROUP));
+        rule_add_to_group(subgroup, rule_create_terminal(LEX_SYM_HOGER_DAN, PRIORITY_PRIMARY, PARSER_TYPE_OPERATOR));
+        rule_add_to_group(subgroup, rule_create(RULE_TYPE_OR));
+        rule_add_to_group(subgroup, rule_create_terminal(LEX_SYM_HOGER_DAN_GELIJK_AAN, PRIORITY_PRIMARY, PARSER_TYPE_OPERATOR));
+        rule_add_to_group(subgroup, rule_create(RULE_TYPE_OR));
+        rule_add_to_group(subgroup, rule_create_terminal(LEX_SYM_LAGER_DAN, PRIORITY_PRIMARY, PARSER_TYPE_OPERATOR));
+        rule_add_to_group(subgroup, rule_create(RULE_TYPE_OR));
+        rule_add_to_group(subgroup, rule_create_terminal(LEX_SYM_LAGER_DAN_GELIJK_AAN, PRIORITY_PRIMARY, PARSER_TYPE_OPERATOR));
+
+        rule_add_to_group(group, rule_create_non_terminal(parse_term, PRIORITY_SECONDARY));
+        rule_set_repeat(group, REPEAT_ZERO_OR_MORE);
+    }
+
+    return parse_rule(ruleset.rule, ruleset.size, symbols, symbols_size, symbols_index);
+}
+
 PARSER_NODE* parse_equality(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
 {
-    //equality ::= comparison ( ( "!=" | "==" ) comparison )* ;
-    struct rule rule[] = {
-        {}
-    };
+    static struct ruleset ruleset = { .rule = NULL, .size = 0 };
+    if (ruleset.rule == NULL) {
+        // Add to ruleset
+        ruleset_add(&ruleset, rule_create_non_terminal(parse_comparison, PRIORITY_SECONDARY));
+
+        struct rule *group = ruleset_add(&ruleset, rule_create(RULE_TYPE_GROUP));
+
+        struct rule *subgroup = rule_add_to_group(group, rule_create(RULE_TYPE_GROUP));
+        rule_add_to_group(subgroup, rule_create_terminal(LEX_SYM_NIET_GELIJK_AAN, PRIORITY_PRIMARY, PARSER_TYPE_OPERATOR));
+        rule_add_to_group(subgroup, rule_create(RULE_TYPE_OR));
+        rule_add_to_group(subgroup, rule_create_terminal(LEX_SYM_GELIJK_AAN, PRIORITY_PRIMARY, PARSER_TYPE_OPERATOR));
+
+        rule_add_to_group(group, rule_create_non_terminal(parse_comparison, PRIORITY_SECONDARY));
+        rule_set_repeat(group, REPEAT_ZERO_OR_MORE);
+    }
+
+    return parse_rule(ruleset.rule, ruleset.size, symbols, symbols_size, symbols_index);
 }
 
 PARSER_NODE* parse_expression(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
 {
-    PARSER_NODE *node = NULL;
-
-    skip_unimportant_symbols(symbols, symbols_size, symbols_index);
-
-    // literal
-    node = parse_term(symbols, symbols_size, symbols_index);
-    if (node != NULL) { return node; }
-
-    // unary
-
-
-    // grouping
-
-
-    return node;
+    return parse_equality(symbols, symbols_size, symbols_index);
 }
 
 PARSER_NODE* parse_assignment(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
@@ -379,21 +467,98 @@ PARSER_NODE* parse_assignment(LEX_SYMBOL *symbols, size_t symbols_size, size_t *
         ruleset_add(&ruleset, rule_create_terminal(LEX_SYM_NAAM, PRIORITY_SECONDARY, PARSER_TYPE_IDENTIFIER));
         ruleset_add(&ruleset, rule_create_terminal(LEX_SYM_IS, PRIORITY_PRIMARY, PARSER_TYPE_ASSIGNMENT));
         ruleset_add(&ruleset, rule_create_non_terminal(parse_expression, PRIORITY_SECONDARY));
+        // ruleset_add(&ruleset, rule_create_terminal(LEX_SYM_PUNTKOMMA, PRIORITY_NONE, PARSER_TYPE_NONE));
     }
 
     return parse_rule(ruleset.rule, ruleset.size, symbols, symbols_size, symbols_index);
 }
 
-PARSER_NODE_BODY* parse(LEX_SYMBOL *symbols, size_t symbols_size)
+PARSER_NODE_BODY* parse(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index);
+
+PARSER_NODE* parse_if(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
+{
+    if (*symbols_index >= symbols_size) return NULL;
+
+    if (symbols[*symbols_index].type != LEX_SYM_ALS) return NULL;
+    *symbols_index += 1;
+
+    skip_unimportant_symbols(symbols, symbols_size, symbols_index);
+
+    PARSER_NODE *expression = parse_expression(symbols, symbols_size, symbols_index);
+    if (expression == NULL) return NULL;
+
+    skip_unimportant_symbols(symbols, symbols_size, symbols_index);
+
+    if (*symbols_index >= symbols_size) return NULL;
+
+    if (symbols[*symbols_index].type != LEX_SYM_ACCOLADE_OPEN) return NULL;
+    *symbols_index += 1;
+
+    PARSER_NODE_BODY *true_body = parse(symbols, symbols_size, symbols_index);
+
+    skip_unimportant_symbols(symbols, symbols_size, symbols_index);
+    if (symbols[*symbols_index].type != LEX_SYM_ACCOLADE_SLUIT) return NULL;
+
+    PARSER_NODE *node = malloc(sizeof(PARSER_NODE));
+    node->type = PARSER_TYPE_CONDITIONAL;
+    node->expression = expression;
+    node->left = NULL;
+    node->right = NULL;
+
+    PARSER_NODE *true_node = malloc(sizeof(PARSER_NODE));
+    true_node->type = PARSER_TYPE_BODY;
+    true_node->right = NULL;
+    true_node->body = *true_body;
+    node->right = true_node;
+
+    return node;
+}
+
+PARSER_NODE_BODY* parse(LEX_SYMBOL *symbols, size_t symbols_size, size_t *symbols_index)
 {
     PARSER_NODE_BODY *body = malloc(sizeof(PARSER_NODE_BODY));
-    body->expressions = malloc(sizeof(PARSER_NODE*));
-    body->expressions_size = 1;
-    size_t symbols_index = 0;
+    body->expressions = NULL;
+    body->expressions_size = 0;
 
-    body->expressions[0] = parse_assignment(symbols, symbols_size, &symbols_index);
+    PARSER_NODE* (*rule_funcs[])(LEX_SYMBOL*, size_t, size_t*) = {
+        parse_if,
+        parse_assignment,
+    };
+    size_t rule_funcs_size = sizeof(rule_funcs) / sizeof(rule_funcs[0]);
+
+    while (*symbols_index < symbols_size) {
+        skip_unimportant_symbols(symbols, symbols_size, symbols_index);
+        // if (symbols[*symbols_index].type != LEX_SYM_PUNTKOMMA && body->expressions_size > 0) {
+        //     printf("%d\n", symbols[*symbols_index].type);
+        //     printf("error here\n");
+        // }
+
+        // if (body->expressions_size > 0) {
+        //     symbols_index++;
+        // }
+
+        PARSER_NODE *current_node = NULL;
+        for (size_t i = 0; i < rule_funcs_size; i++) {
+            current_node = (rule_funcs[i])(symbols, symbols_size, symbols_index);
+            if (current_node != NULL) {
+                body->expressions = realloc(body->expressions, sizeof(PARSER_NODE*) * body->expressions_size + 1);
+                body->expressions[body->expressions_size++] = current_node;
+                break;
+            }
+        }
+        if (current_node == NULL) {
+            // error here
+            break;
+        }
+    }
 
     return body;
+}
+
+PARSER_NODE_BODY* parser(LEX_SYMBOL *symbols, size_t symbols_size)
+{
+    size_t symbols_index = 0;
+    return parse(symbols, symbols_size, &symbols_index);
 }
 
 static char* get_parser_type(PARSER_TYPE type)
@@ -417,8 +582,14 @@ static char* get_parser_type(PARSER_TYPE type)
             return "PARSER_TYPE_UNARY";
         case PARSER_TYPE_BINARY:
             return "PARSER_TYPE_BINARY";
+        case PARSER_TYPE_NEGATE:
+            return "PARSER_TYPE_NEGATE";
+        case PARSER_TYPE_INVERT:
+            return "PARSER_TYPE_INVERT";
         case PARSER_TYPE_OPERATOR:
             return "PARSER_TYPE_OPERATOR";
+        case PARSER_TYPE_CONDITIONAL:
+            return "PARSER_TYPE_CONDITIONAL";
         default:
             return "UNKNOWN TYPE";
     }
@@ -426,19 +597,54 @@ static char* get_parser_type(PARSER_TYPE type)
 
 static void recursive_node_print(PARSER_NODE *node, int level)
 {
-    printf("%*s%s\n", level*4, "", get_parser_type(node->type));
+    printf("%s ", get_parser_type(node->type));
     if (node->type == PARSER_TYPE_LITERAL) {
         if (node->literal == PARSER_LITERAL_NUMBER) {
-            printf("%*s  %i\n", level*4, "", node->number);
+            printf("%i", node->number);
+        } else if (node->literal == PARSER_LITERAL_BOOLEAN) {
+            printf("%s", node->boolean ? "waar" : "onwaar");
+        } else if (node->literal == PARSER_LITERAL_STRING) {
+            printf("\"%s\"", node->string);
+        }
+    } else if (node->type == PARSER_TYPE_IDENTIFIER) {
+        printf("%s", node->identifier);
+    } else if (node->type == PARSER_TYPE_OPERATOR) {
+        switch (node->operator) {
+            case PARSER_OPERATOR_ADD: printf("+"); break;
+            case PARSER_OPERATOR_SUBTRACT: printf("-"); break;
+            case PARSER_OPERATOR_MULTIPLY: printf("*"); break;
+            case PARSER_OPERATOR_DIVIDE: printf("/"); break;
+            case PARSER_OPERATOR_EQUAL_TO: printf("=="); break;
+            case PARSER_OPERATOR_NOT_EQUAL_TO: printf("!="); break;
+            case PARSER_OPERATOR_LOWER_THAN: printf("<"); break;
+            case PARSER_OPERATOR_LOWER_THAN_EQUAL_TO: printf("<="); break;
+            case PARSER_OPERATOR_HIGHER_THAN: printf(">"); break;
+            case PARSER_OPERATOR_HIGHER_THAN_EQUAL_TO: printf(">="); break;
+        }
+    } else if (node->type == PARSER_TYPE_CONDITIONAL) {
+        printf("\n%*sCondition: ", level*4, "");
+        recursive_node_print(node->expression, level+1);
+    } else if (node->type == PARSER_TYPE_BODY) {
+        printf("\n");
+        for (size_t i = 0; i < node->body.expressions_size; i++) {
+            printf("%*s", level*4, "");
+            // printf("%p\n", (void*)body->expressions[i]);
+            if (node->body.expressions[i] != NULL) {
+                recursive_node_print(node->body.expressions[i], level+1);
+            } else {
+                printf("NULL\n");
+            }
         }
     }
+    printf("\n");
+
     if (node->left != NULL) {
-        printf("%*sLeft Node:", level*4, "");
+        printf("%*sLeft Node: ", level*4, "");
         recursive_node_print(node->left, level+1);
     }
 
     if (node->right != NULL) {
-        printf("%*sRight Node:", level*4, "");
+        printf("%*sRight Node: ", level*4, "");
         recursive_node_print(node->right, level+1);
     }
 }
@@ -446,7 +652,11 @@ static void recursive_node_print(PARSER_NODE *node, int level)
 void parser_debug_print(PARSER_NODE_BODY *body)
 {
     for (size_t i = 0; i < body->expressions_size; i++) {
-        printf("%p\n", (void*)body->expressions[i]);
-        recursive_node_print(body->expressions[i], 0);
+        // printf("%p\n", (void*)body->expressions[i]);
+        if (body->expressions[i] != NULL) {
+            recursive_node_print(body->expressions[i], 1);
+        } else {
+            printf("NULL\n");
+        }
     }
 }

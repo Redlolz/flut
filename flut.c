@@ -2,10 +2,15 @@
 #include "parser.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#ifndef BYTECODE_INTERPRETER
+#include "treewalker.h"
+#endif
 
 void gebruik(FILE *restrict __stream, char *exec_naam)
 {
-    fprintf(stderr, "Gebruik: %s [BESTAND]\n", exec_naam);
+    fprintf(__stream, "Gebruik: %s [BESTAND]\n", exec_naam);
 }
 
 int main(int argc, char *argv[])
@@ -27,12 +32,12 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // Grootte van bestand
     fseek(f, 0, SEEK_END);
     fsize = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    // printf("%ld\n", fsize);
-
+    // Laad bestand in geheugen
     buf = malloc(fsize);
     fread(buf, fsize, 1, f);
     fclose(f);
@@ -43,7 +48,19 @@ int main(int argc, char *argv[])
 
     lex_debug_print(symbols, symbols_size);
 
-    PARSER_NODE_BODY *body = parse(symbols, symbols_size);
+    PARSER_NODE_BODY *body = parser(symbols, symbols_size);
 
-    parser_debug_print(body);
+    if (body != NULL) {
+        parser_debug_print(body);
+    } else {
+        printf("Returned NULL\nExiting...");
+        return 1;
+    }
+
+    #ifndef BYTECODE_INTERPRETER
+    // Gebruik de tree-walk interpreter
+
+    treewalk(body);
+
+    #endif
 }

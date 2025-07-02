@@ -1,1 +1,9 @@
-test = 1 + 2 * 3 + 1 + 1 + 1
+what = "test";
+test = 1 + 2 * 3 + 4 * 4 + 1;
+te=3*3;
+bruh = 1;
+
+als 0 {
+    huh = 5;
+    whaa = 6;
+};

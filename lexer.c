@@ -84,6 +84,9 @@ typedef struct {
 } keyword;
 
 const keyword keywords[] = {
+    { .keyword = "waar", .symbool = LEX_SYM_WAAR },
+    { .keyword = "onwaar", .symbool = LEX_SYM_ONWAAR },
+    { .keyword = "als", .symbool = LEX_SYM_ALS },
     { .keyword = "functie", .symbool = LEX_SYM_FUNCTIE },
     { .keyword = "teruggave", .symbool = LEX_SYM_TERUGGAVE },
 };
@@ -156,8 +159,63 @@ LEX_SYMBOL* lex_parse_mem(char *buf, size_t bufsize, size_t *symbols_size)
                 });
                 break;
             case '=':
+                // check voor '=='
+                if (i+1 < bufsize) {
+                    if (buf[i+1] == '=') {
+                        sym_array_add(&syms, (LEX_SYMBOL){
+                            .type = LEX_SYM_GELIJK_AAN
+                        });
+                        i++;
+                        break;
+                    }
+                }
                 sym_array_add(&syms, (LEX_SYMBOL){
                     .type = LEX_SYM_IS
+                });
+                break;
+            case '!':
+                // check voor '!='
+                if (i+1 < bufsize) {
+                    if (buf[i+1] == '=') {
+                        sym_array_add(&syms, (LEX_SYMBOL){
+                            .type = LEX_SYM_NIET_GELIJK_AAN
+                        });
+                        i++;
+                        break;
+                    }
+                }
+                sym_array_add(&syms, (LEX_SYMBOL){
+                    .type = LEX_SYM_UITROEPTEKEN
+                });
+                break;
+            case '<':
+                // check voor '<='
+                if (i+1 < bufsize) {
+                    if (buf[i+1] == '=') {
+                        sym_array_add(&syms, (LEX_SYMBOL){
+                            .type = LEX_SYM_LAGER_DAN_GELIJK_AAN
+                        });
+                        i++;
+                        break;
+                    }
+                }
+                sym_array_add(&syms, (LEX_SYMBOL){
+                    .type = LEX_SYM_LAGER_DAN
+                });
+                break;
+            case '>':
+                // check voor '>='
+                if (i+1 < bufsize) {
+                    if (buf[i+1] == '=') {
+                        sym_array_add(&syms, (LEX_SYMBOL){
+                            .type = LEX_SYM_HOGER_DAN_GELIJK_AAN
+                        });
+                        i++;
+                        break;
+                    }
+                }
+                sym_array_add(&syms, (LEX_SYMBOL){
+                    .type = LEX_SYM_HOGER_DAN
                 });
                 break;
             case '+':
@@ -260,6 +318,9 @@ void lex_debug_print(LEX_SYMBOL *symbols, size_t size)
             case LEX_SYM_IS:
                 putchar('=');
                 break;
+            case LEX_SYM_UITROEPTEKEN:
+                putchar('!');
+                break;
             case LEX_SYM_PLUS:
                 putchar('+');
                 break;
@@ -271,6 +332,12 @@ void lex_debug_print(LEX_SYMBOL *symbols, size_t size)
                 break;
             case LEX_SYM_DELEN:
                 putchar('/');
+                break;
+            case LEX_SYM_WAAR:
+                printf("waar");
+                break;
+            case LEX_SYM_ONWAAR:
+                printf("onwaar");
                 break;
             case LEX_SYM_FUNCTIE:
                 printf("functie");
